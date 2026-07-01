@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useTranslation } from 'react-i18next'
@@ -61,7 +61,7 @@ import {
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
 import { getAdminPlans } from '@/features/subscriptions/api'
-import { type PlanRecord } from '@/features/subscriptions/types'
+import type { PlanRecord } from '@/features/subscriptions/types'
 import { createRedemption, updateRedemption, getRedemption } from '../api'
 import { SUCCESS_MESSAGES } from '../constants'
 import {
@@ -71,7 +71,7 @@ import {
   transformFormDataToPayload,
   transformRedemptionToFormDefaults,
 } from '../lib'
-import { type Redemption } from '../types'
+import type { Redemption } from '../types'
 import { useRedemptions } from './redemptions-provider'
 
 type RedemptionsMutateDrawerProps = {
@@ -107,35 +107,43 @@ export function RedemptionsMutateDrawer({
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    setPlansLoading(true)
-    getAdminPlans()
-      .then((result) => {
+    void (async () => {
+      setPlansLoading(true)
+      try {
+        const result = await getAdminPlans()
         if (!cancelled && result.success && result.data) {
           setPlans(result.data)
         }
-      })
-      .finally(() => {
+      } catch {
+        if (!cancelled) toast.error(t('Failed to load subscription plans'))
+      } finally {
         if (!cancelled) setPlansLoading(false)
-      })
+      }
+    })()
     return () => {
       cancelled = true
     }
-  }, [open])
+  }, [open, t])
 
   // Load existing data when updating
   useEffect(() => {
     if (open && isUpdate && currentRow) {
       // For update, fetch fresh data
-      getRedemption(currentRow.id).then((result) => {
-        if (result.success && result.data) {
-          form.reset(transformRedemptionToFormDefaults(result.data))
+      void (async () => {
+        try {
+          const result = await getRedemption(currentRow.id)
+          if (result.success && result.data) {
+            form.reset(transformRedemptionToFormDefaults(result.data))
+          }
+        } catch {
+          toast.error(t('Failed to load redemption code'))
         }
-      })
+      })()
     } else if (open && !isUpdate) {
       // For create, reset to defaults
       form.reset(REDEMPTION_FORM_DEFAULT_VALUES)
     }
-  }, [open, isUpdate, currentRow, form])
+  }, [open, isUpdate, currentRow, form, t])
 
   const onSubmit = async (data: RedemptionFormValues) => {
     setIsSubmitting(true)
@@ -351,7 +359,7 @@ export function RedemptionsMutateDrawer({
                           step={tokensOnly ? 1 : 0.01}
                           placeholder={quotaPlaceholder}
                           onChange={(e) =>
-                            field.onChange(parseFloat(e.target.value) || 0)
+                            field.onChange(Number.parseFloat(e.target.value) || 0)
                           }
                         />
                       </FormControl>
@@ -440,7 +448,7 @@ export function RedemptionsMutateDrawer({
                           max='100'
                           placeholder={t('Number of codes to create')}
                           onChange={(e) =>
-                            field.onChange(parseInt(e.target.value, 10) || 1)
+                            field.onChange(Number.parseInt(e.target.value, 10) || 1)
                           }
                         />
                       </FormControl>

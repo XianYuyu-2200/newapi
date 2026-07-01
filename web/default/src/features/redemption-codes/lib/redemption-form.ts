@@ -23,7 +23,7 @@ import {
   REDEMPTION_VALIDATION,
   getRedemptionFormErrorMessages,
 } from '../constants'
-import { type RedemptionFormData, type Redemption } from '../types'
+import type { RedemptionFormData, Redemption } from '../types'
 
 // ============================================================================
 // Form Schema (use getRedemptionFormSchema(t) in components for i18n messages)
@@ -37,7 +37,7 @@ export function getRedemptionFormSchema(t: TFunction) {
         .string()
         .min(REDEMPTION_VALIDATION.NAME_MIN_LENGTH, msg.NAME_LENGTH_INVALID)
         .max(REDEMPTION_VALIDATION.NAME_MAX_LENGTH, msg.NAME_LENGTH_INVALID),
-      type: z.enum(['balance', 'subscription']).default('balance'),
+      type: z.enum(['balance', 'subscription']),
       plan_id: z.number().optional(),
       quota_dollars: z.number().min(0, t('Quota must be a positive number')),
       expired_time: z.date().optional(),
