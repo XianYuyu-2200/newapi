@@ -841,6 +841,30 @@ func HasActiveUserSubscription(userId int) (bool, error) {
 	return count > 0, nil
 }
 
+// HasActiveUserSubscriptionForGroup reports whether an active subscription may
+// fund requests in the selected group. Plans with an empty upgrade_group keep
+// legacy behavior and can fund any group; group-bound plans only fund their
+// upgrade_group.
+func HasActiveUserSubscriptionForGroup(userId int, usingGroup string) (bool, error) {
+	if userId <= 0 {
+		return false, errors.New("invalid userId")
+	}
+	now := common.GetTimestamp()
+	usingGroup = strings.TrimSpace(usingGroup)
+	var count int64
+	query := DB.Model(&UserSubscription{}).
+		Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now)
+	if usingGroup != "" {
+		query = query.Where("(upgrade_group = ? OR upgrade_group = '')", usingGroup)
+	} else {
+		query = query.Where("upgrade_group = ''")
+	}
+	if err := query.Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // UserActiveSubscriptionsAllowWalletOverflow returns whether wallet balance may be used
 // after the user's subscription quota is exhausted. A single active subscription that
 // disallows wallet overflow (allow_wallet_overflow = false) blocks the fallback.

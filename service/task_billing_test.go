@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,7 +45,9 @@ func TestMain(m *testing.M) {
 		&model.Log{},
 		&model.Channel{},
 		&model.TopUp{},
+		&model.SubscriptionPlan{},
 		&model.UserSubscription{},
+		&model.SubscriptionPreConsumeRecord{},
 		&model.SystemTask{},
 		&model.SystemTaskLock{},
 	); err != nil {
@@ -102,6 +106,32 @@ func seedSubscription(t *testing.T, id int, userId int, amountTotal int64, amoun
 		Status:      "active",
 		StartTime:   time.Now().Unix(),
 		EndTime:     time.Now().Add(30 * 24 * time.Hour).Unix(),
+	}
+	require.NoError(t, model.DB.Create(sub).Error)
+}
+
+func seedSubscriptionWithGroup(t *testing.T, id int, userId int, amountTotal int64, amountUsed int64, upgradeGroup string) {
+	t.Helper()
+	plan := &model.SubscriptionPlan{
+		Id:            id,
+		Title:         "test_plan",
+		DurationUnit:  model.SubscriptionDurationMonth,
+		DurationValue: 1,
+		Enabled:       true,
+		UpgradeGroup:  upgradeGroup,
+		TotalAmount:   amountTotal,
+	}
+	require.NoError(t, model.DB.Create(plan).Error)
+	sub := &model.UserSubscription{
+		Id:           id,
+		UserId:       userId,
+		PlanId:       id,
+		AmountTotal:  amountTotal,
+		AmountUsed:   amountUsed,
+		Status:       "active",
+		StartTime:    time.Now().Unix(),
+		EndTime:      time.Now().Add(30 * 24 * time.Hour).Unix(),
+		UpgradeGroup: upgradeGroup,
 	}
 	require.NoError(t, model.DB.Create(sub).Error)
 }
@@ -717,4 +747,66 @@ func TestSettle_NonPerCallBilling_AppliesAdaptorAdjustment(t *testing.T) {
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
+}
+
+func TestNewBillingSession_UsesWalletWhenRequestGroupDoesNotMatchSubscriptionGroup(t *testing.T) {
+	truncate(t)
+	ctx, _ := gin.CreateTestContext(nil)
+
+	const userID, tokenID = 40, 40
+	const initQuota, tokenRemain, preConsumed = 10000, 10000, 0
+
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-group-wallet", tokenRemain)
+	seedSubscriptionWithGroup(t, 40, userID, 50000, 0, "套餐GPT")
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:          userID,
+		TokenId:         tokenID,
+		TokenKey:        "sk-group-wallet",
+		OriginModelName: "gpt-5.5",
+		UsingGroup:      "余额GPT",
+		UserSetting:     dto.UserSetting{BillingPreference: "subscription_first"},
+		RequestId:       "req-wallet-group",
+	}
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, preConsumed)
+
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	assert.Equal(t, BillingSourceWallet, relayInfo.BillingSource)
+	assert.Zero(t, relayInfo.SubscriptionId)
+	assert.Equal(t, initQuota, getUserQuota(t, userID))
+}
+
+func TestNewBillingSession_UsesSubscriptionWhenRequestGroupMatchesSubscriptionGroup(t *testing.T) {
+	truncate(t)
+	ctx, _ := gin.CreateTestContext(nil)
+
+	const userID, tokenID = 41, 41
+	const initQuota, tokenRemain, preConsumed = 10000, 10000, 0
+
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-group-subscription", tokenRemain)
+	seedSubscriptionWithGroup(t, 41, userID, 50000, 0, "套餐GPT")
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:          userID,
+		TokenId:         tokenID,
+		TokenKey:        "sk-group-subscription",
+		OriginModelName: "gpt-5.5",
+		UsingGroup:      "套餐GPT",
+		IsPlayground:    true,
+		UserSetting:     dto.UserSetting{BillingPreference: "subscription_first"},
+		RequestId:       "req-subscription-group",
+	}
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, preConsumed)
+
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	assert.Equal(t, BillingSourceSubscription, relayInfo.BillingSource)
+	assert.Equal(t, 41, relayInfo.SubscriptionId)
+	assert.EqualValues(t, 1, relayInfo.SubscriptionPreConsumed)
+	assert.Equal(t, initQuota, getUserQuota(t, userID))
 }

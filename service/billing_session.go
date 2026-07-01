@@ -377,6 +377,23 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 	}
 
 	trySubscription := func() (*BillingSession, *types.NewAPIError) {
+		usingGroup := strings.TrimSpace(relayInfo.UsingGroup)
+		if usingGroup == "" {
+			usingGroup = strings.TrimSpace(relayInfo.UserGroup)
+		}
+		hasGroupSub, subCheckErr := model.HasActiveUserSubscriptionForGroup(relayInfo.UserId, usingGroup)
+		if subCheckErr != nil {
+			return nil, types.NewError(subCheckErr, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
+		}
+		if !hasGroupSub {
+			return nil, types.NewErrorWithStatusCode(
+				fmt.Errorf("no active subscription for group %s", usingGroup),
+				types.ErrorCodeInsufficientUserQuota,
+				http.StatusForbidden,
+				types.ErrOptionWithSkipRetry(),
+				types.ErrOptionWithNoRecordErrorLog(),
+			)
+		}
 		subConsume := int64(preConsumedQuota)
 		if subConsume <= 0 {
 			subConsume = 1
@@ -415,7 +432,11 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 	case "subscription_first":
 		fallthrough
 	default:
-		hasSub, subCheckErr := model.HasActiveUserSubscription(relayInfo.UserId)
+		usingGroup := strings.TrimSpace(relayInfo.UsingGroup)
+		if usingGroup == "" {
+			usingGroup = strings.TrimSpace(relayInfo.UserGroup)
+		}
+		hasSub, subCheckErr := model.HasActiveUserSubscriptionForGroup(relayInfo.UserId, usingGroup)
 		if subCheckErr != nil {
 			return nil, types.NewError(subCheckErr, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
 		}
