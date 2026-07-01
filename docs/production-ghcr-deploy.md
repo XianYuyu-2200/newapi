@@ -14,11 +14,19 @@ This deployment path keeps builds away from the production server.
 subscription-group-lock-697f4b8
 ```
 
-The workflow publishes:
+The manual workflow publishes:
 
 ```text
 ghcr.io/xianyuyu-2200/newapi:subscription-group-lock-697f4b8
 ```
+
+Pushing to `main` also publishes an automatic tag:
+
+```text
+ghcr.io/xianyuyu-2200/newapi:prod-<commit>
+```
+
+Use the exact image tag shown in the GitHub Actions run summary.
 
 ## 2. Deploy on production
 
@@ -27,14 +35,17 @@ Run these commands on the NewAPI production server.
 ```bash
 set -e
 
+export IMAGE="ghcr.io/xianyuyu-2200/newapi:subscription-group-lock-697f4b8"
+
 cd /opt/newapi
 BACKUP_DIR="/opt/newapi/backups/$(date +%Y%m%d-%H%M%S)-pre-ghcr-deploy"
 mkdir -p "$BACKUP_DIR"
 cp -a docker-compose.yml "$BACKUP_DIR/docker-compose.yml"
 
-docker pull ghcr.io/xianyuyu-2200/newapi:subscription-group-lock-697f4b8
+docker pull "$IMAGE"
 
 python3 - <<'PY'
+import os
 from pathlib import Path
 
 path = Path("/opt/newapi/docker-compose.yml")
@@ -43,7 +54,7 @@ old_images = [
     "xianyuyu/newapi:subscription-redemption-1c72333",
     "ghcr.io/xianyuyu-2200/newapi:subscription-group-lock-697f4b8",
 ]
-new_image = "ghcr.io/xianyuyu-2200/newapi:subscription-group-lock-697f4b8"
+new_image = os.environ["IMAGE"]
 
 for old_image in old_images:
     text = text.replace(old_image, new_image)

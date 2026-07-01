@@ -1,6 +1,9 @@
 name: Publish production Docker image
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       image_tag:
@@ -39,7 +42,10 @@ jobs:
         id: image
         shell: bash
         run: |
-          TAG="${{ inputs.image_tag }}"
+          TAG="${{ github.event.inputs.image_tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="prod-${GITHUB_SHA::7}"
+          fi
           IMAGE="${REGISTRY}/${IMAGE_NAME}"
 
           if [[ ! "$TAG" =~ ^[A-Za-z0-9_.-]+$ ]]; then
@@ -52,7 +58,7 @@ jobs:
           {
             echo "tags<<EOF"
             echo "${IMAGE}:${TAG}"
-            if [ "${{ inputs.push_latest }}" = "true" ]; then
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.push_latest }}" = "true" ]; then
               echo "${IMAGE}:latest"
             fi
             echo "EOF"
