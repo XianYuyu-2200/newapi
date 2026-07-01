@@ -842,9 +842,8 @@ func HasActiveUserSubscription(userId int) (bool, error) {
 }
 
 // HasActiveUserSubscriptionForGroup reports whether an active subscription may
-// fund requests in the selected group. Plans with an empty upgrade_group keep
-// legacy behavior and can fund any group; group-bound plans only fund their
-// upgrade_group.
+// fund requests in the selected group. Subscription quota is intentionally
+// strict: an empty upgrade_group must not fund another named group.
 func HasActiveUserSubscriptionForGroup(userId int, usingGroup string) (bool, error) {
 	if userId <= 0 {
 		return false, errors.New("invalid userId")
@@ -855,7 +854,7 @@ func HasActiveUserSubscriptionForGroup(userId int, usingGroup string) (bool, err
 	query := DB.Model(&UserSubscription{}).
 		Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now)
 	if usingGroup != "" {
-		query = query.Where("(upgrade_group = ? OR upgrade_group = '')", usingGroup)
+		query = query.Where("upgrade_group = ?", usingGroup)
 	} else {
 		query = query.Where("upgrade_group = ''")
 	}
@@ -1166,6 +1165,13 @@ func maybeResetUserSubscriptionWithPlanTx(tx *gorm.DB, sub *UserSubscription, pl
 
 // PreConsumeUserSubscription pre-consumes from any active subscription total quota.
 func PreConsumeUserSubscription(requestId string, userId int, modelName string, quotaType int, amount int64) (*SubscriptionPreConsumeResult, error) {
+	return PreConsumeUserSubscriptionForGroup(requestId, userId, modelName, quotaType, amount, "")
+}
+
+// PreConsumeUserSubscriptionForGroup pre-consumes from an active subscription
+// that belongs to the selected request group. Named groups require an exact
+// upgrade_group match so wallet groups cannot consume subscription quota.
+func PreConsumeUserSubscriptionForGroup(requestId string, userId int, modelName string, quotaType int, amount int64, usingGroup string) (*SubscriptionPreConsumeResult, error) {
 	if userId <= 0 {
 		return nil, errors.New("invalid userId")
 	}
@@ -1175,6 +1181,7 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 	if amount <= 0 {
 		return nil, errors.New("amount must be > 0")
 	}
+	usingGroup = strings.TrimSpace(usingGroup)
 	now := GetDBTimestamp()
 
 	returnValue := &SubscriptionPreConsumeResult{}
@@ -1202,10 +1209,13 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 		}
 
 		var subs []UserSubscription
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+		subQuery := tx.Set("gorm:query_option", "FOR UPDATE").
 			Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
-			Order("end_time asc, id asc").
-			Find(&subs).Error; err != nil {
+			Order("end_time asc, id asc")
+		if usingGroup != "" {
+			subQuery = subQuery.Where("upgrade_group = ?", usingGroup)
+		}
+		if err := subQuery.Find(&subs).Error; err != nil {
 			return errors.New("no active subscription")
 		}
 		if len(subs) == 0 {

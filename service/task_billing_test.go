@@ -779,6 +779,37 @@ func TestNewBillingSession_UsesWalletWhenRequestGroupDoesNotMatchSubscriptionGro
 	assert.Equal(t, initQuota, getUserQuota(t, userID))
 }
 
+func TestNewBillingSession_UsesWalletWhenSubscriptionGroupIsEmpty(t *testing.T) {
+	truncate(t)
+	ctx, _ := gin.CreateTestContext(nil)
+
+	const userID, tokenID = 42, 42
+	const initQuota, tokenRemain, preConsumed = 10000, 10000, 0
+
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-empty-group-wallet", tokenRemain)
+	seedSubscriptionWithGroup(t, 42, userID, 50000, 0, "")
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:          userID,
+		TokenId:         tokenID,
+		TokenKey:        "sk-empty-group-wallet",
+		OriginModelName: "gpt-5.5",
+		UsingGroup:      "余额GPT",
+		UserSetting:     dto.UserSetting{BillingPreference: "subscription_first"},
+		RequestId:       "req-empty-subscription-group",
+	}
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, preConsumed)
+
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	assert.Equal(t, BillingSourceWallet, relayInfo.BillingSource)
+	assert.Zero(t, relayInfo.SubscriptionId)
+	assert.Equal(t, initQuota, getUserQuota(t, userID))
+	assert.EqualValues(t, 0, getSubscriptionUsed(t, 42))
+}
+
 func TestNewBillingSession_UsesSubscriptionWhenRequestGroupMatchesSubscriptionGroup(t *testing.T) {
 	truncate(t)
 	ctx, _ := gin.CreateTestContext(nil)
