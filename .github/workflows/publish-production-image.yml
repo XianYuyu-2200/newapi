@@ -1,0 +1,93 @@
+name: Publish production Docker image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Production image tag, for example subscription-group-lock-697f4b8"
+        required: true
+        default: "subscription-group-lock-697f4b8"
+        type: string
+      push_latest:
+        description: "Also move ghcr.io/xianyuyu-2200/newapi:latest"
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: publish-production-image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: xianyuyu-2200/newapi
+
+jobs:
+  build_and_push:
+    name: Build and push production image
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Prepare image metadata
+        id: image
+        shell: bash
+        run: |
+          TAG="${{ inputs.image_tag }}"
+          IMAGE="${REGISTRY}/${IMAGE_NAME}"
+
+          if [[ ! "$TAG" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+            echo "::error::image_tag may only contain letters, numbers, dots, underscores, and hyphens"
+            exit 1
+          fi
+
+          echo "$TAG" > VERSION
+
+          {
+            echo "tags<<EOF"
+            echo "${IMAGE}:${TAG}"
+            if [ "${{ inputs.push_latest }}" = "true" ]; then
+              echo "${IMAGE}:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push linux/amd64 image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo "### Production image" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Image: \`${{ steps.image.outputs.image }}:${{ steps.image.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Platform: \`linux/amd64\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Production deploy should only run \`docker pull\` and \`docker compose up -d\`." >> "$GITHUB_STEP_SUMMARY"
