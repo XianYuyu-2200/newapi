@@ -852,11 +852,16 @@ func HasActiveUserSubscriptionForGroup(userId int, usingGroup string) (bool, err
 	usingGroup = strings.TrimSpace(usingGroup)
 	var count int64
 	query := DB.Model(&UserSubscription{}).
-		Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now)
+		Joins("LEFT JOIN subscription_plans ON subscription_plans.id = user_subscriptions.plan_id").
+		Where("user_subscriptions.user_id = ? AND user_subscriptions.status = ? AND user_subscriptions.end_time > ?", userId, "active", now)
 	if usingGroup != "" {
-		query = query.Where("upgrade_group = ?", usingGroup)
+		query = query.Where(
+			"(user_subscriptions.upgrade_group = ? OR (user_subscriptions.upgrade_group = '' AND subscription_plans.upgrade_group = ?))",
+			usingGroup,
+			usingGroup,
+		)
 	} else {
-		query = query.Where("upgrade_group = ''")
+		query = query.Where("user_subscriptions.upgrade_group = '' AND (subscription_plans.upgrade_group = '' OR subscription_plans.id IS NULL)")
 	}
 	if err := query.Count(&count).Error; err != nil {
 		return false, err
@@ -1210,10 +1215,15 @@ func PreConsumeUserSubscriptionForGroup(requestId string, userId int, modelName 
 
 		var subs []UserSubscription
 		subQuery := tx.Set("gorm:query_option", "FOR UPDATE").
-			Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
-			Order("end_time asc, id asc")
+			Joins("LEFT JOIN subscription_plans ON subscription_plans.id = user_subscriptions.plan_id").
+			Where("user_subscriptions.user_id = ? AND user_subscriptions.status = ? AND user_subscriptions.end_time > ?", userId, "active", now).
+			Order("user_subscriptions.end_time asc, user_subscriptions.id asc")
 		if usingGroup != "" {
-			subQuery = subQuery.Where("upgrade_group = ?", usingGroup)
+			subQuery = subQuery.Where(
+				"(user_subscriptions.upgrade_group = ? OR (user_subscriptions.upgrade_group = '' AND subscription_plans.upgrade_group = ?))",
+				usingGroup,
+				usingGroup,
+			)
 		}
 		if err := subQuery.Find(&subs).Error; err != nil {
 			return errors.New("no active subscription")

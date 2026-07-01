@@ -810,6 +810,59 @@ func TestNewBillingSession_UsesWalletWhenSubscriptionGroupIsEmpty(t *testing.T) 
 	assert.EqualValues(t, 0, getSubscriptionUsed(t, 42))
 }
 
+func TestNewBillingSession_UsesPlanGroupWhenSubscriptionSnapshotGroupIsEmpty(t *testing.T) {
+	truncate(t)
+	ctx, _ := gin.CreateTestContext(nil)
+
+	const userID, tokenID = 43, 43
+	const initQuota, tokenRemain, preConsumed = 10000, 10000, 0
+
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-plan-group-subscription", tokenRemain)
+	plan := &model.SubscriptionPlan{
+		Id:            43,
+		Title:         "legacy_snapshot_plan",
+		DurationUnit:  model.SubscriptionDurationMonth,
+		DurationValue: 1,
+		Enabled:       true,
+		UpgradeGroup:  "package",
+		TotalAmount:   50000,
+	}
+	require.NoError(t, model.DB.Create(plan).Error)
+	sub := &model.UserSubscription{
+		Id:           43,
+		UserId:       userID,
+		PlanId:       plan.Id,
+		AmountTotal:  50000,
+		AmountUsed:   0,
+		Status:       "active",
+		StartTime:    time.Now().Unix(),
+		EndTime:      time.Now().Add(30 * 24 * time.Hour).Unix(),
+		UpgradeGroup: "",
+	}
+	require.NoError(t, model.DB.Create(sub).Error)
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:          userID,
+		TokenId:         tokenID,
+		TokenKey:        "sk-plan-group-subscription",
+		OriginModelName: "gpt-5.5",
+		UsingGroup:      "package",
+		IsPlayground:    true,
+		UserSetting:     dto.UserSetting{BillingPreference: "subscription_first"},
+		RequestId:       "req-plan-group-subscription",
+	}
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, preConsumed)
+
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	assert.Equal(t, BillingSourceSubscription, relayInfo.BillingSource)
+	assert.Equal(t, 43, relayInfo.SubscriptionId)
+	assert.EqualValues(t, 1, relayInfo.SubscriptionPreConsumed)
+	assert.Equal(t, initQuota, getUserQuota(t, userID))
+}
+
 func TestNewBillingSession_UsesSubscriptionWhenRequestGroupMatchesSubscriptionGroup(t *testing.T) {
 	truncate(t)
 	ctx, _ := gin.CreateTestContext(nil)
