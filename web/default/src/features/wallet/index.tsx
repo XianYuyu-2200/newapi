@@ -73,6 +73,7 @@ export function Wallet(props: WalletProps) {
   const [selectedCreemProduct, setSelectedCreemProduct] =
     useState<CreemProduct | null>(null)
   const [showSubscriptionPanel, setShowSubscriptionPanel] = useState(true)
+  const [subscriptionRefreshKey, setSubscriptionRefreshKey] = useState(0)
 
   const { status } = useStatus()
   const { currency } = useSystemConfig()
@@ -204,6 +205,7 @@ export function Wallet(props: WalletProps) {
     if (success) {
       setRedemptionCode('')
       await fetchUser()
+      setSubscriptionRefreshKey((key) => key + 1)
     }
   }
 
@@ -307,6 +309,7 @@ export function Wallet(props: WalletProps) {
               </div>
 
               <SubscriptionPlansCard
+                key={subscriptionRefreshKey}
                 topupInfo={topupInfo}
                 onAvailabilityChange={handleSubscriptionAvailabilityChange}
                 userQuota={user?.quota}

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"unicode/utf8"
@@ -88,6 +89,10 @@ func AddRedemption(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 		return
 	}
+	if err := normalizeAndValidateRedemptionForAdmin(&redemption); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	var keys []string
 	for i := 0; i < redemption.Count; i++ {
 		key := common.GetUUID()
@@ -96,6 +101,8 @@ func AddRedemption(c *gin.Context) {
 			Name:        redemption.Name,
 			Key:         key,
 			CreatedTime: common.GetTimestamp(),
+			Type:        redemption.Type,
+			PlanId:      redemption.PlanId,
 			Quota:       redemption.Quota,
 			ExpiredTime: redemption.ExpiredTime,
 		}
@@ -112,9 +119,11 @@ func AddRedemption(c *gin.Context) {
 		keys = append(keys, key)
 	}
 	recordManageAudit(c, "redemption.create", map[string]interface{}{
-		"name":  redemption.Name,
-		"count": redemption.Count,
-		"quota": logger.LogQuota(redemption.Quota),
+		"name":    redemption.Name,
+		"count":   redemption.Count,
+		"type":    redemption.Type,
+		"plan_id": redemption.PlanId,
+		"quota":   logger.LogQuota(redemption.Quota),
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -156,8 +165,14 @@ func UpdateRedemption(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 			return
 		}
+		if err := normalizeAndValidateRedemptionForAdmin(&redemption); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 		// If you add more fields, please also update redemption.Update()
 		cleanRedemption.Name = redemption.Name
+		cleanRedemption.Type = redemption.Type
+		cleanRedemption.PlanId = redemption.PlanId
 		cleanRedemption.Quota = redemption.Quota
 		cleanRedemption.ExpiredTime = redemption.ExpiredTime
 	}
@@ -196,4 +211,28 @@ func validateExpiredTime(c *gin.Context, expired int64) (bool, string) {
 		return false, i18n.T(c, i18n.MsgRedemptionExpireTimeInvalid)
 	}
 	return true, ""
+}
+
+func normalizeAndValidateRedemptionForAdmin(redemption *model.Redemption) error {
+	if redemption == nil {
+		return nil
+	}
+	if redemption.Type == "" {
+		redemption.Type = model.RedemptionTypeBalance
+	}
+	switch redemption.Type {
+	case model.RedemptionTypeSubscription:
+		if redemption.PlanId <= 0 {
+			return errors.New("subscription redemption requires plan_id")
+		}
+		if _, err := model.GetSubscriptionPlanById(redemption.PlanId); err != nil {
+			return err
+		}
+		redemption.Quota = 0
+	case model.RedemptionTypeBalance:
+		redemption.PlanId = 0
+	default:
+		return errors.New("invalid redemption type")
+	}
+	return nil
 }
